@@ -1,0 +1,113 @@
+name: Atividade Prisma - CI (migrations + Docker)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: atividade-prisma
+
+jobs:
+  migrations-e-docker:
+    runs-on: ubuntu-latest
+
+    # Variaveis de ambiente cadastradas no GitHub:
+    #   Settings > Secrets and variables > Actions
+    #   - Variables: POSTGRES_USER, POSTGRES_DB
+    #   - Secret:    POSTGRES_PASSWORD
+    env:
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      DATABASE_URL: postgresql://${{ vars.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/${{ vars.POSTGRES_DB }}?schema=public
+      # usadas pelo psql no script de teste
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: ${{ vars.POSTGRES_USER }}
+      PGPASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      PGDATABASE: ${{ vars.POSTGRES_DB }}
+
+    # Container do banco: so existe durante a execucao do job (alguns minutos)
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Conferir variaveis de ambiente cadastradas
+        run: |
+          test -n "$POSTGRES_USER"     || { echo "Variable POSTGRES_USER nao cadastrada"; exit 1; }
+          test -n "$POSTGRES_DB"       || { echo "Variable POSTGRES_DB nao cadastrada"; exit 1; }
+          test -n "$POSTGRES_PASSWORD" || { echo "Secret POSTGRES_PASSWORD nao cadastrado"; exit 1; }
+          echo "POSTGRES_USER=$POSTGRES_USER"
+          echo "POSTGRES_DB=$POSTGRES_DB"
+          echo "POSTGRES_PASSWORD=*** (secret)"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: atividade-prisma/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Build (prisma generate + tsc)
+        run: npm run build
+
+      - name: Banco rodando (service container)
+        run: |
+          docker ps --filter "ancestor=postgres:16-alpine"
+          pg_isready
+          psql -c "SELECT version();"
+
+      - name: Aplicar migrations (prisma migrate deploy)
+        run: npx prisma migrate deploy
+
+      - name: Status das migrations
+        run: npx prisma migrate status
+
+      - name: Testar migrations (estrutura e dados do banco)
+        run: bash scripts/test-migrations.sh
+
+      - name: Criar imagem Docker
+        run: |
+          docker build -t api-produtos-prisma:ci .
+          docker images api-produtos-prisma
+
+      - name: Rodar a imagem e testar a API
+        run: |
+          docker run -d --name api --network host -e DATABASE_URL="$DATABASE_URL" -e PORT=3000 api-produtos-prisma:ci
+          for i in $(seq 1 30); do curl -sf localhost:3000/api/health && break; sleep 2; done
+          echo; docker logs api
+          echo "--- GET /api/health";      curl -sf localhost:3000/api/health; echo
+          echo "--- GET /api/categories";  curl -sf localhost:3000/api/categories; echo
+          echo "--- POST /api/products"
+          curl -sf -X POST localhost:3000/api/products -H "Content-Type: application/json" \
+               -d '{"name":"Webcam HD","price":189.9,"categoryId":1}'; echo
+          echo "--- GET /api/products?inStock=true"
+          curl -sf "localhost:3000/api/products?inStock=true"; echo
+          total=$(curl -sf localhost:3000/api/products | jq '.meta.total')
+          echo "total de produtos: $total"
+          test "$total" -eq 6
+
+      - name: Logs da API (em caso de falha)
+        if: failure()
+        run: docker logs api || true
