@@ -101,5 +101,8 @@ O workflow `.github/workflows/atividade-prisma.yml` (na raiz do repositório):
 | `evidencias/05-api-rodando-container.png` | API rodando no container e respondendo requisições |
 | `evidencias/06a-api-swagger-rotas.png` | API no navegador (Swagger com todas as rotas) |
 | `evidencias/06b-api-swagger-health.png` | requisição pelo Swagger respondendo 200 |
-| `evidencias/07-github-variaveis.png` | variáveis e secret cadastrados no GitHub |
-| `evidencias/08-github-actions-pipeline.png` | pipeline do GitHub Actions executada com sucesso |
+| `evidencias/07-github-variaveis.png` | variáveis de ambiente cadastradas no GitHub (`POSTGRES_USER`, `POSTGRES_DB`; senha em secret) |
+| `evidencias/08a-github-actions-resumo.png` | pipeline do GitHub Actions concluída com sucesso |
+| `evidencias/08b-github-actions-passos.png` | todos os passos do job (banco, migrations, testes, imagem, API) |
+| `evidencias/08c-github-actions-teste-migrations.png` | teste das migrations no CI: estrutura e dados do banco |
+| `evidencias/08d-github-actions-imagem-e-api.png` | imagem Docker rodando no CI e API respondendo |
